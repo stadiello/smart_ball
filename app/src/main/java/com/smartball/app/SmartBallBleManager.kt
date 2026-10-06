@@ -129,9 +129,50 @@ class SmartBallBleManager(
     var batteryPercent by mutableStateOf<Int?>(null)
         private set
 
+    private val preferences =
+        context.getSharedPreferences(
+            "smart_ball_settings",
+            Context.MODE_PRIVATE
+        )
+
+    var ballMassGrams by mutableStateOf<Double?>(
+        preferences
+            .getString("ball_mass_grams", null)
+            ?.toDoubleOrNull()
+    )
+        private set
+
 
     init {
         history = loadHistory()
+    }
+
+    fun saveBallMassGrams(
+        grams: Double?
+    ) {
+
+        val valid =
+            grams
+                ?.takeIf {
+                    it > 0.0
+                }
+
+        ballMassGrams =
+            valid
+
+        preferences
+            .edit()
+            .apply {
+                if (valid == null) {
+                    remove("ball_mass_grams")
+                } else {
+                    putString(
+                        "ball_mass_grams",
+                        valid.toString()
+                    )
+                }
+            }
+            .apply()
     }
 
     // ============================================================
@@ -968,7 +1009,10 @@ class SmartBallBleManager(
         val metrics =
             ThrowAnalyzer.analyze(
                 samples = samples,
-                header = header
+                header = header,
+                ballMassKg =
+                    ballMassGrams
+                        ?.div(1000.0)
             )
 
         val metadata =
@@ -981,6 +1025,11 @@ class SmartBallBleManager(
                 .put(
                     "distanceM",
                     JSONObject.NULL
+                )
+                .put(
+                    "ballMassGrams",
+                    ballMassGrams
+                        ?: JSONObject.NULL
                 )
                 .put(
                     "sampleCount",
@@ -1277,6 +1326,18 @@ class SmartBallBleManager(
             val payload =
                 rawFile.readBytes()
 
+            val massGrams =
+                if (
+                    json.has("ballMassGrams") &&
+                    !json.isNull("ballMassGrams")
+                ) {
+                    json.getDouble(
+                        "ballMassGrams"
+                    )
+                } else {
+                    ballMassGrams
+                }
+
             ThrowAnalyzer.analyze(
                 samples =
                     ThrowAnalyzer.decodeSamples(
@@ -1285,7 +1346,10 @@ class SmartBallBleManager(
                     ),
                 header = header,
                 distanceMeters =
-                    distanceMeters
+                    distanceMeters,
+                ballMassKg =
+                    massGrams
+                        ?.div(1000.0)
             )
 
         } catch (_: Exception) {
