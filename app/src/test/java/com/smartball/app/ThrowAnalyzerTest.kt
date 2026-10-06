@@ -171,12 +171,12 @@ class ThrowAnalyzerTest {
                     )
 
                     putInt(123_456)
-                    putShort(100)
+                    putShort(100.toShort())
                     putShort((-200).toShort())
-                    putShort(300)
-                    putShort(400)
+                    putShort(300.toShort())
+                    putShort(400.toShort())
                     putShort((-500).toShort())
-                    putShort(600)
+                    putShort(600.toShort())
                 }
                 .array()
 
