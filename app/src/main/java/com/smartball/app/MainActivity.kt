@@ -76,6 +76,20 @@ fun SmartBallScreen(
                 mutableStateOf("")
             }
 
+    var ballMassText
+            by remember {
+                mutableStateOf(
+                    ble.ballMassGrams
+                        ?.let {
+                            "%.1f".format(
+                                Locale.US,
+                                it
+                            )
+                        }
+                        ?: ""
+                )
+            }
+
 
     val permissionLauncher =
         rememberLauncherForActivityResult(
@@ -298,6 +312,76 @@ fun SmartBallScreen(
                     }
                 }
             }
+
+
+            Card(
+                modifier =
+                    Modifier.fillMaxWidth()
+            ) {
+
+                Column(
+                    modifier =
+                        Modifier.padding(16.dp),
+                    verticalArrangement =
+                        Arrangement.spacedBy(8.dp)
+                ) {
+
+                    Text(
+                        "Masse de la balle instrumentée",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .labelLarge
+                    )
+
+                    OutlinedTextField(
+                        value =
+                            ballMassText,
+                        onValueChange = {
+                            ballMassText = it
+                        },
+                        label = {
+                            Text("Masse (g)")
+                        },
+                        supportingText = {
+                            Text(
+                                "Nécessaire uniquement pour calculer force et impulsion."
+                            )
+                        },
+                        keyboardOptions =
+                            KeyboardOptions(
+                                keyboardType =
+                                    KeyboardType.Decimal
+                            ),
+                        modifier =
+                            Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = {
+                            val mass =
+                                ballMassText
+                                    .replace(",", ".")
+                                    .toDoubleOrNull()
+
+                            ble.saveBallMassGrams(
+                                mass
+                            )
+                        },
+                        modifier =
+                            Modifier.fillMaxWidth()
+                    ) {
+
+                        Text(
+                            if (ble.ballMassGrams != null)
+                                "Enregistrer la masse"
+                            else
+                                "Définir la masse"
+                        )
+                    }
+                }
+            }
+
 
 
             // ========================
