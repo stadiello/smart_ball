@@ -45,13 +45,6 @@ object ThrowAnalyzer {
     const val HEADER_SIZE = 16
     const val SAMPLE_SIZE = 16
 
-    /**
-     * Masse nominale de la TB100 seule (~38 g).
-     * A remplacer par la masse réellement mesurée de la balle instrumentée
-     * pour améliorer les estimations de force et d'impulsion.
-     */
-    const val DEFAULT_BALL_MASS_KG = 0.038
-
     private const val GRAVITY_MPS2 = 9.80665
     private const val FREE_FALL_THRESHOLD_G = 0.75
     private const val FLIGHT_MIN_CONSECUTIVE_SAMPLES = 8
@@ -93,7 +86,7 @@ object ThrowAnalyzer {
         samples: List<ImuSample>,
         header: EventHeader,
         distanceMeters: Double? = null,
-        ballMassKg: Double = DEFAULT_BALL_MASS_KG
+        ballMassKg: Double? = null
     ): ThrowMetrics {
         if (samples.isEmpty()) {
             return ThrowMetrics(
@@ -148,8 +141,12 @@ object ThrowAnalyzer {
                 .maxOfOrNull { accelNormG(samples[it], accelScale) }
 
         val peakImpactForceNewton =
-            peakImpactAccelerationG?.let {
-                ballMassKg * it * GRAVITY_MPS2
+            if (ballMassKg != null && ballMassKg > 0.0) {
+                peakImpactAccelerationG?.let {
+                    ballMassKg * it * GRAVITY_MPS2
+                }
+            } else {
+                null
             }
 
         if (flightStartIndex == null || flightStartIndex >= impactIndex) {
@@ -196,18 +193,26 @@ object ThrowAnalyzer {
         // Approximation : on retire seulement la norme statique de 1 g.
         // Sans estimation d'attitude complète, ce n'est pas une force nette 3D.
         val peakLaunchForceNewton =
-            peakLaunchAccelerationG?.let {
-                ballMassKg * max(it - 1.0, 0.0) * GRAVITY_MPS2
+            if (ballMassKg != null && ballMassKg > 0.0) {
+                peakLaunchAccelerationG?.let {
+                    ballMassKg * max(it - 1.0, 0.0) * GRAVITY_MPS2
+                }
+            } else {
+                null
             }
 
         val launchImpulseNewtonSecond =
-            integrateLaunchImpulse(
-                samples = samples,
-                startIndex = launchStart,
-                endIndexExclusive = flightStartIndex,
-                accelScaleGPerLsb = accelScale,
-                ballMassKg = ballMassKg
-            )
+            if (ballMassKg != null && ballMassKg > 0.0) {
+                integrateLaunchImpulse(
+                    samples = samples,
+                    startIndex = launchStart,
+                    endIndexExclusive = flightStartIndex,
+                    accelScaleGPerLsb = accelScale,
+                    ballMassKg = ballMassKg
+                )
+            } else {
+                null
+            }
 
         val flightSamples =
             samples.subList(flightStartIndex, impactIndex)
