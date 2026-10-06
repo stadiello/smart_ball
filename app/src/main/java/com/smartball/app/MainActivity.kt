@@ -76,6 +76,20 @@ fun SmartBallScreen(
                 mutableStateOf("")
             }
 
+    var ballMassText
+            by remember {
+                mutableStateOf(
+                    ble.ballMassGrams
+                        ?.let {
+                            "%.1f".format(
+                                Locale.US,
+                                it
+                            )
+                        }
+                        ?: ""
+                )
+            }
+
 
     val permissionLauncher =
         rememberLauncherForActivityResult(
@@ -300,6 +314,76 @@ fun SmartBallScreen(
             }
 
 
+            Card(
+                modifier =
+                    Modifier.fillMaxWidth()
+            ) {
+
+                Column(
+                    modifier =
+                        Modifier.padding(16.dp),
+                    verticalArrangement =
+                        Arrangement.spacedBy(8.dp)
+                ) {
+
+                    Text(
+                        "Masse de la balle instrumentée",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .labelLarge
+                    )
+
+                    OutlinedTextField(
+                        value =
+                            ballMassText,
+                        onValueChange = {
+                            ballMassText = it
+                        },
+                        label = {
+                            Text("Masse (g)")
+                        },
+                        supportingText = {
+                            Text(
+                                "Nécessaire uniquement pour calculer force et impulsion."
+                            )
+                        },
+                        keyboardOptions =
+                            KeyboardOptions(
+                                keyboardType =
+                                    KeyboardType.Decimal
+                            ),
+                        modifier =
+                            Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = {
+                            val mass =
+                                ballMassText
+                                    .replace(",", ".")
+                                    .toDoubleOrNull()
+
+                            ble.saveBallMassGrams(
+                                mass
+                            )
+                        },
+                        modifier =
+                            Modifier.fillMaxWidth()
+                    ) {
+
+                        Text(
+                            if (ble.ballMassGrams != null)
+                                "Enregistrer la masse"
+                            else
+                                "Définir la masse"
+                        )
+                    }
+                }
+            }
+
+
+
             // ========================
             // CONNECT
             // ========================
@@ -408,36 +492,9 @@ fun SmartBallScreen(
                 )
 
 
-                Card(
-                    modifier =
-                        Modifier.fillMaxWidth()
-                ) {
-
-                    Column(
-                        modifier =
-                            Modifier.padding(
-                                16.dp
-                            ),
-                        verticalArrangement =
-                            Arrangement.spacedBy(
-                                6.dp
-                            )
-                    ) {
-
-                        Text(
-                            "${throwRecord.sampleCount} échantillons"
-                        )
-
-                        Text(
-                            "${throwRecord.sampleRateHz} Hz"
-                        )
-
-                        Text(
-                            "Impact index : " +
-                                    "${throwRecord.triggerIndex}"
-                        )
-                    }
-                }
+                ThrowMetricsCard(
+                    record = throwRecord
+                )
 
 
                 // ------------------------
@@ -540,6 +597,294 @@ fun SmartBallScreen(
 
 
 @Composable
+fun ThrowMetricsCard(
+    record: ThrowRecord
+) {
+
+    val metrics =
+        record.metrics
+
+    Card(
+        modifier =
+            Modifier.fillMaxWidth()
+    ) {
+
+        Column(
+            modifier =
+                Modifier.padding(16.dp),
+            verticalArrangement =
+                Arrangement.spacedBy(10.dp)
+        ) {
+
+            Text(
+                "Analyse du lancer",
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleMedium,
+                fontWeight =
+                    FontWeight.Bold
+            )
+
+            Text(
+                "${record.sampleCount} échantillons • " +
+                    "${record.sampleRateHz} Hz"
+            )
+
+            if (metrics == null) {
+
+                Text(
+                    "Analyse indisponible pour ce lancer."
+                )
+
+                return@Column
+            }
+
+            MetricRow(
+                "Temps de vol",
+                metrics.flightTimeSeconds
+                    ?.let {
+                        "%.3f s".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Hauteur balistique estimée",
+                metrics.ballisticHeightMeters
+                    ?.let {
+                        "%.2f m".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Vitesse verticale initiale",
+                metrics.ballisticVerticalSpeedMps
+                    ?.let {
+                        "%.2f m/s".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Accélération max. au lancer",
+                metrics.peakLaunchAccelerationG
+                    ?.let {
+                        "%.1f g".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Force max. estimée au lancer",
+                metrics.peakLaunchForceNewton
+                    ?.let {
+                        "%.2f N".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Impulsion estimée",
+                metrics.launchImpulseNewtonSecond
+                    ?.let {
+                        "%.3f N·s".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Impact max.",
+                metrics.peakImpactAccelerationG
+                    ?.let {
+                        "%.1f g".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Spin moyen",
+                metrics.meanSpinRpm
+                    ?.let {
+                        "%.0f RPM".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Spin max.",
+                metrics.peakSpinRpm
+                    ?.let {
+                        "%.0f RPM".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Rotations en vol",
+                metrics.rotationsInFlight
+                    ?.let {
+                        "%.1f tours".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Stabilité du spin",
+                metrics.spinStabilityPercent
+                    ?.let {
+                        "%.0f %%".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Stabilité de l'axe",
+                metrics.spinAxisStabilityPercent
+                    ?.let {
+                        "%.0f %%".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Vitesse horizontale moyenne",
+                metrics.averageHorizontalSpeedMps
+                    ?.let {
+                        "%.2f m/s".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Vitesse initiale balistique",
+                metrics.ballisticInitialSpeedMps
+                    ?.let {
+                        "%.2f m/s".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            MetricRow(
+                "Angle de lancer estimé",
+                metrics.ballisticLaunchAngleDeg
+                    ?.let {
+                        "%.1f°".format(
+                            Locale.FRANCE,
+                            it
+                        )
+                    }
+            )
+
+            if (
+                metrics.accelSaturated ||
+                metrics.gyroSaturated
+            ) {
+
+                Text(
+                    buildString {
+                        append(
+                            "⚠ Saturation capteur détectée"
+                        )
+
+                        if (metrics.accelSaturated) {
+                            append(" • accéléromètre")
+                        }
+
+                        if (metrics.gyroSaturated) {
+                            append(" • gyroscope")
+                        }
+                    },
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodySmall
+                )
+            }
+
+            Text(
+                "Les valeurs de hauteur, force, impulsion, vitesse et angle sont des estimations. " +
+                    "La hauteur/vitesse/angle supposent notamment un départ et une arrivée à hauteur comparable. " +
+                    "Force et impulsion utilisent une masse nominale de 38 g.",
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun MetricRow(
+    label: String,
+    value: String?
+) {
+
+    if (value == null) {
+        return
+    }
+
+    Row(
+        modifier =
+            Modifier.fillMaxWidth(),
+        horizontalArrangement =
+            Arrangement.SpaceBetween,
+        verticalAlignment =
+            Alignment.CenterVertically
+    ) {
+
+        Text(
+            label,
+            modifier =
+                Modifier.weight(1f)
+        )
+
+        Spacer(
+            Modifier.width(12.dp)
+        )
+
+        Text(
+            value,
+            fontWeight =
+                FontWeight.SemiBold
+        )
+    }
+}
+
+
+
+@Composable
 fun ThrowHistoryCard(
     record: ThrowRecord
 ) {
@@ -585,9 +930,38 @@ fun ThrowHistoryCard(
                         FontWeight.Bold
                 )
 
+                val metrics =
+                    record.metrics
+
                 Text(
-                    "${record.sampleCount} samples • " +
-                            "${record.sampleRateHz} Hz"
+                    buildString {
+                        append(
+                            "${record.sampleCount} samples • " +
+                                "${record.sampleRateHz} Hz"
+                        )
+
+                        metrics
+                            ?.flightTimeSeconds
+                            ?.let {
+                                append(
+                                    " • %.2f s".format(
+                                        Locale.FRANCE,
+                                        it
+                                    )
+                                )
+                            }
+
+                        metrics
+                            ?.meanSpinRpm
+                            ?.let {
+                                append(
+                                    " • %.0f RPM".format(
+                                        Locale.FRANCE,
+                                        it
+                                    )
+                                )
+                            }
+                    }
                 )
             }
 

@@ -43,6 +43,7 @@ data class ThrowRecord(
     val sampleRateHz: Int,
     val triggerIndex: Int,
     val distanceMeters: Double?,
+    val metrics: ThrowMetrics?,
     val directoryPath: String
 )
 
@@ -128,9 +129,50 @@ class SmartBallBleManager(
     var batteryPercent by mutableStateOf<Int?>(null)
         private set
 
+    private val preferences =
+        context.getSharedPreferences(
+            "smart_ball_settings",
+            Context.MODE_PRIVATE
+        )
+
+    var ballMassGrams by mutableStateOf<Double?>(
+        preferences
+            .getString("ball_mass_grams", null)
+            ?.toDoubleOrNull()
+    )
+        private set
+
 
     init {
         history = loadHistory()
+    }
+
+    fun saveBallMassGrams(
+        grams: Double?
+    ) {
+
+        val valid =
+            grams
+                ?.takeIf {
+                    it > 0.0
+                }
+
+        ballMassGrams =
+            valid
+
+        preferences
+            .edit()
+            .apply {
+                if (valid == null) {
+                    remove("ball_mass_grams")
+                } else {
+                    putString(
+                        "ball_mass_grams",
+                        valid.toString()
+                    )
+                }
+            }
+            .apply()
     }
 
     // ============================================================
@@ -958,6 +1000,21 @@ class SmartBallBleManager(
         ).writeBytes(payload)
 
 
+        val samples =
+            ThrowAnalyzer.decodeSamples(
+                payload,
+                header
+            )
+
+        val metrics =
+            ThrowAnalyzer.analyze(
+                samples = samples,
+                header = header,
+                ballMassKg =
+                    ballMassGrams
+                        ?.div(1000.0)
+            )
+
         val metadata =
             JSONObject()
                 .put("id", id)
@@ -968,6 +1025,11 @@ class SmartBallBleManager(
                 .put(
                     "distanceM",
                     JSONObject.NULL
+                )
+                .put(
+                    "ballMassGrams",
+                    ballMassGrams
+                        ?: JSONObject.NULL
                 )
                 .put(
                     "sampleCount",
@@ -1005,6 +1067,10 @@ class SmartBallBleManager(
                     "format",
                     "EventHeader16 + ImuSample16[]"
                 )
+                .put(
+                    "analysis",
+                    metricsToJson(metrics)
+                )
 
 
         File(
@@ -1025,6 +1091,7 @@ class SmartBallBleManager(
             triggerIndex =
                 header.triggerIndex,
             distanceMeters = null,
+            metrics = metrics,
             directoryPath =
                 directory.absolutePath
         )
@@ -1064,6 +1131,21 @@ class SmartBallBleManager(
             meters
         )
 
+        val updatedMetrics =
+            record.metrics?.let {
+                ThrowAnalyzer.withDistance(
+                    it,
+                    meters
+                )
+            }
+
+        if (updatedMetrics != null) {
+            json.put(
+                "analysis",
+                metricsToJson(updatedMetrics)
+            )
+        }
+
         metadataFile.writeText(
             json.toString(2)
         )
@@ -1071,7 +1153,8 @@ class SmartBallBleManager(
 
         val updated =
             record.copy(
-                distanceMeters = meters
+                distanceMeters = meters,
+                metrics = updatedMetrics
             )
 
         lastThrow = updated
@@ -1143,6 +1226,13 @@ class SmartBallBleManager(
                         }
 
 
+                    val metrics =
+                        loadMetrics(
+                            directory = directory,
+                            json = json,
+                            distanceMeters = distance
+                        )
+
                     ThrowRecord(
                         id =
                             json.getString(
@@ -1172,6 +1262,9 @@ class SmartBallBleManager(
                         distanceMeters =
                             distance,
 
+                        metrics =
+                            metrics,
+
                         directoryPath =
                             directory.absolutePath
                     )
@@ -1187,6 +1280,245 @@ class SmartBallBleManager(
                 it.createdAt
             }
             ?: emptyList()
+    }
+
+
+    private fun loadMetrics(
+        directory: File,
+        json: JSONObject,
+        distanceMeters: Double?
+    ): ThrowMetrics? {
+
+        val analysis =
+            json.optJSONObject("analysis")
+
+        if (analysis != null) {
+            return metricsFromJson(analysis)
+        }
+
+        // Compatibilité avec les lancers enregistrés avant
+        // l'ajout de l'analyse : recalcul depuis raw.bin.
+        val rawFile =
+            File(directory, "raw.bin")
+
+        if (!rawFile.exists()) {
+            return null
+        }
+
+        return try {
+
+            val header =
+                EventHeader(
+                    version = 1,
+                    flags = 0,
+                    sampleCount =
+                        json.getInt("sampleCount"),
+                    triggerIndex =
+                        json.getInt("triggerIndex"),
+                    sampleRateHz =
+                        json.getInt("sampleRateHz"),
+                    accelRangeG =
+                        json.optInt("accelRangeG", 16),
+                    gyroRangeDps =
+                        json.optInt("gyroRangeDps", 2000)
+                )
+
+            val payload =
+                rawFile.readBytes()
+
+            val massGrams =
+                if (
+                    json.has("ballMassGrams") &&
+                    !json.isNull("ballMassGrams")
+                ) {
+                    json.getDouble(
+                        "ballMassGrams"
+                    )
+                } else {
+                    ballMassGrams
+                }
+
+            ThrowAnalyzer.analyze(
+                samples =
+                    ThrowAnalyzer.decodeSamples(
+                        payload,
+                        header
+                    ),
+                header = header,
+                distanceMeters =
+                    distanceMeters,
+                ballMassKg =
+                    massGrams
+                        ?.div(1000.0)
+            )
+
+        } catch (_: Exception) {
+
+            null
+        }
+    }
+
+
+    private fun metricsToJson(
+        metrics: ThrowMetrics
+    ): JSONObject {
+
+        fun JSONObject.putNullable(
+            key: String,
+            value: Any?
+        ): JSONObject =
+            put(
+                key,
+                value ?: JSONObject.NULL
+            )
+
+        return JSONObject()
+            .putNullable(
+                "flightStartIndex",
+                metrics.flightStartIndex
+            )
+            .put(
+                "impactIndex",
+                metrics.impactIndex
+            )
+            .putNullable(
+                "flightTimeSeconds",
+                metrics.flightTimeSeconds
+            )
+            .putNullable(
+                "peakLaunchAccelerationG",
+                metrics.peakLaunchAccelerationG
+            )
+            .putNullable(
+                "peakImpactAccelerationG",
+                metrics.peakImpactAccelerationG
+            )
+            .putNullable(
+                "peakLaunchForceNewton",
+                metrics.peakLaunchForceNewton
+            )
+            .putNullable(
+                "peakImpactForceNewton",
+                metrics.peakImpactForceNewton
+            )
+            .putNullable(
+                "launchImpulseNewtonSecond",
+                metrics.launchImpulseNewtonSecond
+            )
+            .putNullable(
+                "meanSpinRpm",
+                metrics.meanSpinRpm
+            )
+            .putNullable(
+                "peakSpinRpm",
+                metrics.peakSpinRpm
+            )
+            .putNullable(
+                "rotationsInFlight",
+                metrics.rotationsInFlight
+            )
+            .putNullable(
+                "spinStabilityPercent",
+                metrics.spinStabilityPercent
+            )
+            .putNullable(
+                "spinAxisStabilityPercent",
+                metrics.spinAxisStabilityPercent
+            )
+            .putNullable(
+                "ballisticHeightMeters",
+                metrics.ballisticHeightMeters
+            )
+            .putNullable(
+                "ballisticVerticalSpeedMps",
+                metrics.ballisticVerticalSpeedMps
+            )
+            .putNullable(
+                "averageHorizontalSpeedMps",
+                metrics.averageHorizontalSpeedMps
+            )
+            .putNullable(
+                "ballisticInitialSpeedMps",
+                metrics.ballisticInitialSpeedMps
+            )
+            .putNullable(
+                "ballisticLaunchAngleDeg",
+                metrics.ballisticLaunchAngleDeg
+            )
+            .put(
+                "accelSaturated",
+                metrics.accelSaturated
+            )
+            .put(
+                "gyroSaturated",
+                metrics.gyroSaturated
+            )
+    }
+
+
+    private fun metricsFromJson(
+        json: JSONObject
+    ): ThrowMetrics {
+
+        fun nullableDouble(
+            key: String
+        ): Double? =
+            if (json.isNull(key))
+                null
+            else
+                json.optDouble(key)
+                    .takeUnless { it.isNaN() }
+
+        fun nullableInt(
+            key: String
+        ): Int? =
+            if (json.isNull(key))
+                null
+            else
+                json.optInt(key)
+
+        return ThrowMetrics(
+            flightStartIndex =
+                nullableInt("flightStartIndex"),
+            impactIndex =
+                json.optInt("impactIndex"),
+            flightTimeSeconds =
+                nullableDouble("flightTimeSeconds"),
+            peakLaunchAccelerationG =
+                nullableDouble("peakLaunchAccelerationG"),
+            peakImpactAccelerationG =
+                nullableDouble("peakImpactAccelerationG"),
+            peakLaunchForceNewton =
+                nullableDouble("peakLaunchForceNewton"),
+            peakImpactForceNewton =
+                nullableDouble("peakImpactForceNewton"),
+            launchImpulseNewtonSecond =
+                nullableDouble("launchImpulseNewtonSecond"),
+            meanSpinRpm =
+                nullableDouble("meanSpinRpm"),
+            peakSpinRpm =
+                nullableDouble("peakSpinRpm"),
+            rotationsInFlight =
+                nullableDouble("rotationsInFlight"),
+            spinStabilityPercent =
+                nullableDouble("spinStabilityPercent"),
+            spinAxisStabilityPercent =
+                nullableDouble("spinAxisStabilityPercent"),
+            ballisticHeightMeters =
+                nullableDouble("ballisticHeightMeters"),
+            ballisticVerticalSpeedMps =
+                nullableDouble("ballisticVerticalSpeedMps"),
+            averageHorizontalSpeedMps =
+                nullableDouble("averageHorizontalSpeedMps"),
+            ballisticInitialSpeedMps =
+                nullableDouble("ballisticInitialSpeedMps"),
+            ballisticLaunchAngleDeg =
+                nullableDouble("ballisticLaunchAngleDeg"),
+            accelSaturated =
+                json.optBoolean("accelSaturated"),
+            gyroSaturated =
+                json.optBoolean("gyroSaturated")
+        )
     }
 
 
